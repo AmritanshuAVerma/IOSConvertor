@@ -604,4 +604,14 @@ Examples:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        print(f"\n❌ ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+    finally:
+        # Keep window open so user can see output/errors
+        if getattr(sys, 'frozen', False):
+            print("\n" + "=" * 50)
+            input("Press Enter to exit...")
