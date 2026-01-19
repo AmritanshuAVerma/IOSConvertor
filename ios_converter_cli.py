@@ -771,6 +771,9 @@ def interactive_mode() -> None:
     Prompts user to select folder/files and handles conversion with
     user-friendly prompts.
     """
+    # Initialize logging
+    log_file = setup_logging()
+    
     print("\n" + "=" * 60)
     print("           iOS FORMAT CONVERTER - INTERACTIVE MODE")
     print("=" * 60)
