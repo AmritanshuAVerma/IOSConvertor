@@ -486,6 +486,112 @@ def check_dependencies() -> bool:
 
 
 # =============================================================================
+# INTERACTIVE MODE (for standalone exe)
+# =============================================================================
+
+def interactive_mode() -> None:
+    """
+    Interactive mode for standalone executable.
+    
+    Prompts user to select folder/files and handles conversion with
+    user-friendly prompts.
+    """
+    print("\n" + "=" * 60)
+    print("           iOS FORMAT CONVERTER - INTERACTIVE MODE")
+    print("=" * 60)
+    print("\nConvert HEIC/HEIF images to PNG  |  MOV/M4V videos to MP4")
+    print()
+    
+    # Ask user for input folder
+    print("Enter the path to the folder containing iOS files")
+    print("(You can drag and drop the folder here, then press Enter)")
+    print()
+    folder_path = input("Folder path: ").strip().strip('"')
+    
+    if not folder_path:
+        print("\n❌ No folder specified. Exiting.")
+        return
+    
+    if not os.path.isdir(folder_path):
+        print(f"\n❌ Error: '{folder_path}' is not a valid folder.")
+        return
+    
+    print("\n" + "=" * 60)
+    
+    # Check dependencies
+    if not check_dependencies():
+        print("\n⚠️ Warning: Some dependencies are missing.")
+        print("Image conversion may work, but video conversion requires FFmpeg.")
+        response = input("\nContinue anyway? (y/n): ").strip().lower()
+        if response != 'y':
+            return
+    
+    # Initialize converter
+    converter = IOSConverter()
+    
+    # Scan for files
+    print(f"\n🔍 Scanning folder: {folder_path}")
+    files_to_convert = converter.scan_directory(folder_path, recursive=True)
+    
+    if not files_to_convert:
+        print("\n❌ No iOS files found (HEIC, HEIF, MOV, M4V).")
+        return
+    
+    print(f"\n✅ Found {len(files_to_convert)} file(s) to convert:")
+    
+    # Show file types breakdown
+    heic_count = sum(1 for f in files_to_convert if Path(f).suffix.lower() in ['.heic', '.heif'])
+    video_count = sum(1 for f in files_to_convert if Path(f).suffix.lower() in ['.mov', '.m4v'])
+    
+    if heic_count > 0:
+        print(f"   📷 {heic_count} image(s) (HEIC/HEIF → PNG)")
+    if video_count > 0:
+        print(f"   🎬 {video_count} video(s) (MOV/M4V → MP4)")
+    
+    print("\n" + "=" * 60)
+    
+    # Confirm conversion
+    response = input("\nStart conversion? (y/n): ").strip().lower()
+    if response != 'y':
+        print("\n❌ Conversion cancelled.")
+        return
+    
+    # Create dated output folder
+    output_dir = get_default_output_dir()
+    print(f"\n📁 Output folder: {output_dir}")
+    print(f"\n🔄 Converting {len(files_to_convert)} file(s)...")
+    print("=" * 60)
+    
+    # Process files
+    success = 0
+    failed = 0
+    
+    for i, file_path in enumerate(files_to_convert, 1):
+        print(f"\n[{i}/{len(files_to_convert)}] ", end="")
+        
+        if not os.path.exists(file_path):
+            print(f"✗ File not found: {Path(file_path).name}")
+            failed += 1
+            continue
+        
+        try:
+            converter.convert_file(file_path, output_dir)
+            success += 1
+        except Exception as e:
+            print(f"✗ Error: {Path(file_path).name} - {str(e)}")
+            failed += 1
+    
+    # Print summary
+    print("\n" + "=" * 60)
+    print(f"\n✅ CONVERSION COMPLETE!")
+    print(f"   • {success} file(s) converted successfully")
+    if failed > 0:
+        print(f"   • {failed} file(s) failed")
+    print(f"\n📂 Output saved to:\n   {output_dir}")
+    print("\n" + "=" * 60)
+
+
+# =============================================================================
 # MAIN ENTRY POINT
 # =============================================================================
 
@@ -543,11 +649,16 @@ Examples:
         check_dependencies()
         return
     
-    # Validate input
+    # Validate input - if frozen exe with no args, go interactive
     if not args.files and not args.directory:
-        parser.print_help()
-        print("\nNo files or directory specified. Use --check to verify dependencies.")
-        return
+        if getattr(sys, 'frozen', False):
+            # Interactive mode for standalone exe
+            return interactive_mode()
+        else:
+            # Script mode - show help
+            parser.print_help()
+            print("\nNo files or directory specified. Use --check to verify dependencies.")
+            return
     
     # Check dependencies (warn but continue)
     if not check_dependencies():
