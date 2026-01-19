@@ -293,10 +293,17 @@ class IOSConverter:
                             '-cq', '23',
                             '-b:v', '5M'
                         ])
-                    elif encoder in ('h264_amf', 'h264_qsv'):
+                    elif encoder == 'h264_qsv':
                         test_cmd.extend([
-                            '-b:v', '5M',
-                            '-maxrate', '8M'
+                            '-preset', 'medium',
+                            '-global_quality', '23',
+                            '-b:v', '5M'
+                        ])
+                    elif encoder == 'h264_amf':
+                        test_cmd.extend([
+                            '-quality', 'balanced',
+                            '-rc', 'vbr_latency',
+                            '-b:v', '5M'
                         ])
                     
                     test_cmd.extend([
@@ -463,25 +470,56 @@ class IOSConverter:
         if use_gpu:
             logging.info(f"  Using GPU acceleration: {self.gpu_encoder}")
             
-            # GPU-accelerated encoding with proper settings
+            # GPU-accelerated encoding with encoder-specific settings
             cmd = [
                 self.ffmpeg_path,
                 '-i', str(input_path),       # Input file
                 '-c:v', self.gpu_encoder,    # GPU video encoder
-                '-preset', 'p4',             # NVENC preset (p1-p7, p4 is balanced)
-                '-tune', 'hq',               # High quality tuning
-                '-profile:v', 'high',        # H.264 High Profile
-                '-rc', 'vbr',                # Variable bitrate
-                '-cq', '23',                 # Constant quality (like CRF)
-                '-b:v', '5M',                # Target bitrate
-                '-maxrate', '8M',            # Max bitrate
-                '-bufsize', '10M',           # Buffer size
+            ]
+            
+            # Add encoder-specific parameters
+            if self.gpu_encoder == 'h264_nvenc':
+                # NVIDIA NVENC settings
+                cmd.extend([
+                    '-preset', 'p4',         # NVENC preset (p1-p7, p4 is balanced)
+                    '-tune', 'hq',           # High quality tuning
+                    '-profile:v', 'high',    # H.264 High Profile
+                    '-rc', 'vbr',            # Variable bitrate
+                    '-cq', '23',             # Constant quality (like CRF)
+                    '-b:v', '5M',            # Target bitrate
+                    '-maxrate', '8M',        # Max bitrate
+                    '-bufsize', '10M',       # Buffer size
+                ])
+            elif self.gpu_encoder == 'h264_qsv':
+                # Intel Quick Sync settings
+                cmd.extend([
+                    '-preset', 'medium',     # QSV preset (veryfast to veryslow)
+                    '-global_quality', '23', # Quality level (0-51, lower is better)
+                    '-look_ahead', '1',      # Enable lookahead for better quality
+                    '-b:v', '5M',            # Target bitrate
+                    '-maxrate', '8M',        # Max bitrate
+                    '-bufsize', '10M',       # Buffer size
+                ])
+            elif self.gpu_encoder == 'h264_amf':
+                # AMD AMF settings
+                cmd.extend([
+                    '-quality', 'balanced',  # AMF quality preset
+                    '-rc', 'vbr_latency',    # Variable bitrate
+                    '-qp_i', '23',           # I-frame quality
+                    '-qp_p', '23',           # P-frame quality
+                    '-b:v', '5M',            # Target bitrate
+                    '-maxrate', '8M',        # Max bitrate
+                    '-bufsize', '10M',       # Buffer size
+                ])
+            
+            # Common settings for all GPU encoders
+            cmd.extend([
                 '-c:a', 'aac',               # Audio codec: AAC
                 '-b:a', '128k',              # Audio bitrate: 128 kbps
                 '-movflags', '+faststart',   # Enable progressive download
                 '-y',                        # Overwrite output
                 str(output_path)
-            ]
+            ])
             print(f"  ⚡ Using GPU acceleration: {self.gpu_encoder}")
         else:
             logging.info("  Using CPU encoding")
