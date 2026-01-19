@@ -101,24 +101,35 @@ class IOSConverter:
             None: If FFmpeg is not available
         
         Search Order:
-            1. Bundled with PyInstaller exe (for distributed builds)
-            2. Local ffmpeg_bin folder (for development)
-            3. System PATH
-            4. Common Windows installation paths
+            1. Bundled with PyInstaller exe (MEIPASS temp folder)
+            2. Same directory as executable
+            3. Local ffmpeg_bin folder (for development)
+            4. System PATH
+            5. Common Windows installation paths
         """
         # Check if running as bundled exe (PyInstaller sets 'frozen' attribute)
         if getattr(sys, 'frozen', False):
-            # Running as compiled exe - check same directory
+            # PyInstaller extracts to a temp folder accessed via _MEIPASS
+            if hasattr(sys, '_MEIPASS'):
+                bundled_ffmpeg = Path(sys._MEIPASS) / 'ffmpeg.exe'
+                if bundled_ffmpeg.exists():
+                    return str(bundled_ffmpeg)
+            
+            # Also check same directory as the exe
             exe_dir = Path(sys.executable).parent
             bundled_ffmpeg = exe_dir / 'ffmpeg.exe'
             if bundled_ffmpeg.exists():
                 return str(bundled_ffmpeg)
         
         # Check in script directory (for development)
-        script_dir = Path(__file__).parent
-        local_ffmpeg = script_dir / 'ffmpeg_bin' / 'ffmpeg.exe'
-        if local_ffmpeg.exists():
-            return str(local_ffmpeg)
+        try:
+            script_dir = Path(__file__).parent
+            local_ffmpeg = script_dir / 'ffmpeg_bin' / 'ffmpeg.exe'
+            if local_ffmpeg.exists():
+                return str(local_ffmpeg)
+        except NameError:
+            # __file__ may not exist in frozen exe
+            pass
         
         # Check if ffmpeg is in system PATH
         try:
@@ -413,9 +424,13 @@ def get_default_output_dir() -> Path:
     """
     # Determine base directory (handles both script and frozen exe)
     if getattr(sys, 'frozen', False):
+        # For frozen exe, use the directory where the exe is located
         base_dir = Path(sys.executable).parent
     else:
-        base_dir = Path(__file__).parent
+        try:
+            base_dir = Path(__file__).parent
+        except NameError:
+            base_dir = Path.cwd()
     
     # Create timestamped folder name
     date_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
