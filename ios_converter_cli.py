@@ -88,8 +88,8 @@ class IOSConverter:
         4. Common installation directories
         """
         self.ffmpeg_path: Optional[str] = self._find_ffmpeg()
-        # Disable GPU by default for reliability (non-technical users)
-        self.gpu_encoder: Optional[str] = None
+        # Re-enable GPU detection
+        self.gpu_encoder: Optional[str] = self._detect_gpu_encoder() if self.ffmpeg_path else None
     
     def _find_ffmpeg(self) -> Optional[str]:
         """
@@ -193,20 +193,40 @@ class IOSConverter:
                 )
                 
                 if result.returncode == 0 and encoder in result.stdout:
-                    # Verify encoder actually works by doing a capability test
-                    # Generate a 1-second test video to verify GPU encoding works
+                    # Verify encoder actually works with real encoding parameters
+                    # Test with settings similar to actual video conversion
+                    test_cmd = [
+                        self.ffmpeg_path,
+                        '-f', 'lavfi',
+                        '-i', 'testsrc=duration=1:size=1280x720:rate=30',  # HD test pattern
+                        '-c:v', encoder,
+                    ]
+                    
+                    # Add encoder-specific settings
+                    if encoder == 'h264_nvenc':
+                        test_cmd.extend([
+                            '-preset', 'p4',
+                            '-tune', 'hq',
+                            '-rc', 'vbr',
+                            '-cq', '23',
+                            '-b:v', '5M'
+                        ])
+                    elif encoder in ('h264_amf', 'h264_qsv'):
+                        test_cmd.extend([
+                            '-b:v', '5M',
+                            '-maxrate', '8M'
+                        ])
+                    
+                    test_cmd.extend([
+                        '-f', 'null',
+                        '-'
+                    ])
+                    
                     test_result = subprocess.run(
-                        [
-                            self.ffmpeg_path,
-                            '-f', 'lavfi',                  # Use lavfi (virtual) input
-                            '-i', 'testsrc=duration=1:size=320x240:rate=1',  # 1 sec test pattern
-                            '-c:v', encoder,                # Test the GPU encoder
-                            '-f', 'null',                   # Don't actually write output
-                            '-'                             # Output to stdout (discarded)
-                        ],
+                        test_cmd,
                         capture_output=True,
                         text=True,
-                        timeout=10
+                        timeout=15
                     )
                     
                     # If the test succeeded, the GPU encoder is functional
@@ -335,19 +355,46 @@ class IOSConverter:
         
         print(f"Converting: {input_path.name} -> {output_path.name}")
         
-        # Build FFmpeg command (using reliable CPU encoding)
-        cmd = [
-            self.ffmpeg_path,
-            '-i', str(input_path),      # Input file
-            '-c:v', 'libx264',          # Video codec: H.264
-            '-preset', 'medium',         # Encoding speed/quality balance
-            '-crf', '23',                # Constant Rate Factor (18-28 is good)
-            '-c:a', 'aac',               # Audio codec: AAC
-            '-b:a', '128k',              # Audio bitrate: 128 kbps
-            '-movflags', '+faststart',   # Enable progressive download/streaming
-            '-y',                        # Overwrite output without asking
-            str(output_path)
-        ]
+        # Determine if we should use GPU acceleration
+        use_gpu = self.gpu_encoder is not None
+        
+        # Build FFmpeg command based on GPU availability
+        if use_gpu:
+            # GPU-accelerated encoding with proper settings
+            cmd = [
+                self.ffmpeg_path,
+                '-i', str(input_path),       # Input file
+                '-c:v', self.gpu_encoder,    # GPU video encoder
+                '-preset', 'p4',             # NVENC preset (p1-p7, p4 is balanced)
+                '-tune', 'hq',               # High quality tuning
+                '-profile:v', 'high',        # H.264 High Profile
+                '-rc', 'vbr',                # Variable bitrate
+                '-cq', '23',                 # Constant quality (like CRF)
+                '-b:v', '5M',                # Target bitrate
+                '-maxrate', '8M',            # Max bitrate
+                '-bufsize', '10M',           # Buffer size
+                '-c:a', 'aac',               # Audio codec: AAC
+                '-b:a', '128k',              # Audio bitrate: 128 kbps
+                '-movflags', '+faststart',   # Enable progressive download
+                '-y',                        # Overwrite output
+                str(output_path)
+            ]
+            print(f"  ⚡ Using GPU acceleration: {self.gpu_encoder}")
+        else:
+            # CPU encoding (fallback)
+            cmd = [
+                self.ffmpeg_path,
+                '-i', str(input_path),      # Input file
+                '-c:v', 'libx264',          # Video codec: H.264
+                '-preset', 'medium',         # Encoding speed/quality balance
+                '-crf', '23',                # Constant Rate Factor (18-28 is good)
+                '-c:a', 'aac',               # Audio codec: AAC
+                '-b:a', '128k',              # Audio bitrate: 128 kbps
+                '-movflags', '+faststart',   # Enable progressive download/streaming
+                '-y',                        # Overwrite output without asking
+                str(output_path)
+            ]
+            print(f"  💻 Using CPU encoding")
         
         try:
             # Run FFmpeg with captured output
@@ -360,10 +407,45 @@ class IOSConverter:
             )
             
             if result.returncode != 0:
-                # FFmpeg failed - show simple error message
+                # FFmpeg failed
                 stderr_lines = result.stderr.strip().split('\n') if result.stderr else []
                 error_msg = stderr_lines[-1] if stderr_lines else "Unknown error"
-                raise RuntimeError(f"Video conversion failed: {error_msg}")
+                
+                # If GPU encoding failed, automatically retry with CPU
+                if use_gpu:
+                    print(f"\n⚠️  GPU encoding failed, retrying with CPU...")
+                    print(f"   GPU Error: {error_msg}")
+                    
+                    # Rebuild command for CPU fallback
+                    cmd = [
+                        self.ffmpeg_path,
+                        '-i', str(input_path),
+                        '-c:v', 'libx264',
+                        '-preset', 'medium',
+                        '-crf', '23',
+                        '-c:a', 'aac',
+                        '-b:a', '128k',
+                        '-movflags', '+faststart',
+                        '-y',
+                        str(output_path)
+                    ]
+                    print(f"  💻 Using CPU encoding")
+                    
+                    # Retry with CPU
+                    result = subprocess.run(
+                        cmd,
+                        capture_output=True,
+                        text=True,
+                        timeout=3600
+                    )
+                    
+                    if result.returncode != 0:
+                        stderr_lines = result.stderr.strip().split('\n') if result.stderr else []
+                        error_msg = stderr_lines[-1] if stderr_lines else "Unknown error"
+                        raise RuntimeError(f"Video conversion failed: {error_msg}")
+                else:
+                    # CPU encoding failed (no fallback available)
+                    raise RuntimeError(f"Video conversion failed: {error_msg}")
                 
         except subprocess.TimeoutExpired:
             raise RuntimeError("Conversion timed out (file too large or corrupted)")
@@ -539,7 +621,12 @@ def check_dependencies() -> bool:
     converter = IOSConverter()
     if converter.ffmpeg_path:
         print(f"  ✓ FFmpeg found: {converter.ffmpeg_path}")
-        print(f"  ✓ Using reliable CPU encoding")
+        
+        # Show GPU status
+        if converter.gpu_encoder:
+            print(f"  ⚡ GPU acceleration: {converter.gpu_encoder} (auto-fallback to CPU if needed)")
+        else:
+            print(f"  💻 CPU encoding only (GPU not available)")
     else:
         print("  ✗ FFmpeg is NOT installed (needed for video conversion)")
         all_ok = False
