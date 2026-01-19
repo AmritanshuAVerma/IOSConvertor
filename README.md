@@ -12,7 +12,7 @@ A self-contained application to convert iOS media formats to more common formats
 2. Double-click to run, or use from command line:
 
 ```bash
-# Check if everything works
+# Check if everything works (shows GPU acceleration status)
 iOSConverter.exe --check
 
 # Convert a single file
@@ -32,6 +32,7 @@ The standalone executable includes all dependencies (Python, Pillow, pillow-heif
 
 - 🖼️ **HEIC/HEIF to PNG** - Convert iPhone photos to universal PNG format
 - 🎬 **MOV/M4V to MP4** - Convert iPhone videos with H.264 codec
+- ⚡ **GPU acceleration** - Automatic detection and use of NVIDIA/AMD/Intel hardware encoders
 - 📁 **Batch conversion** - Convert multiple files at once
 - 📂 **Folder scanning** - Auto-detect iOS files in directories (recursive)
 - 📅 **Dated output folders** - Organized output in timestamped folders
@@ -148,16 +149,30 @@ Double-click `convert.bat` for an interactive menu:
 
 ## 🎬 Video Conversion Settings
 
-Videos are converted using optimized FFmpeg settings:
+Videos are converted using optimized FFmpeg settings with automatic GPU acceleration when available:
 
-| Setting | Value | Description |
-|---------|-------|-------------|
-| Video Codec | H.264 (libx264) | Universal compatibility |
-| Quality | CRF 23 | Good quality/size balance |
-| Preset | Medium | Balanced encoding speed |
-| Audio Codec | AAC | Standard audio format |
-| Audio Bitrate | 128 kbps | Good quality audio |
-| Fast Start | Enabled | Web streaming support |
+### GPU Acceleration (Auto-detected)
+
+The converter automatically detects and uses hardware encoders for faster conversion:
+
+| GPU Vendor | Encoder | Speed Improvement |
+|------------|---------|-------------------|
+| NVIDIA | h264_nvenc | 5-10x faster |
+| AMD | h264_amf | 3-7x faster |
+| Intel | h264_qsv | 3-6x faster |
+
+**Note:** GPU encoding is automatically enabled if compatible hardware is detected. Falls back to CPU encoding if no GPU is available.
+
+### Encoding Settings
+
+| Setting | GPU Mode | CPU Mode | Description |
+|---------|----------|----------|-------------|
+| Video Codec | H.264 (NVENC/AMF/QSV) | H.264 (libx264) | Hardware or software encoding |
+| Quality | 5M bitrate | CRF 23 | Excellent quality |
+| Preset | Fast/Medium | Medium | Balanced encoding speed |
+| Audio Codec | AAC | AAC | Standard audio format |
+| Audio Bitrate | 128 kbps | 128 kbps | Good quality audio |
+| Fast Start | Enabled | Enabled | Web streaming support |
 
 ---
 
@@ -237,6 +252,15 @@ The standalone executable includes FFmpeg. If running from source:
 - Ensure the input file is not corrupted
 - Check available disk space
 - Try converting a smaller file first
+- GPU encoding may fail on some systems - the converter will automatically fall back to CPU
+
+### GPU acceleration not working
+- Run `iOSConverter.exe --check` to see if GPU encoder is detected
+- GPU encoding requires up-to-date graphics drivers:
+  - **NVIDIA**: GeForce Driver 378.66 or newer
+  - **AMD**: Radeon Software Adrenalin 17.11.1 or newer
+  - **Intel**: Graphics Driver 15.33 or newer
+- If GPU is not detected, CPU encoding will be used automatically (still fast!)
 
 ### Antivirus blocking the executable
 Some antivirus software may flag PyInstaller executables. This is a false positive - the executable is safe. You can:
