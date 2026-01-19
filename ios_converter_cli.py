@@ -25,6 +25,8 @@ import os
 import sys
 import subprocess
 import argparse
+import logging
+import platform
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, List
@@ -48,6 +50,69 @@ try:
     PIL_AVAILABLE = True
 except ImportError:
     PIL_AVAILABLE = False
+
+# =============================================================================
+# LOGGING CONFIGURATION
+# =============================================================================
+
+def setup_logging() -> str:
+    """
+    Configure logging to file and console.
+    
+    Creates a log file in the same directory as the executable/script
+    with timestamped filename.
+    
+    Returns:
+        str: Path to the log file
+    """
+    # Determine base directory
+    if getattr(sys, 'frozen', False):
+        base_dir = Path(sys.executable).parent
+    else:
+        try:
+            base_dir = Path(__file__).parent
+        except NameError:
+            base_dir = Path.cwd()
+    
+    # Create logs directory
+    log_dir = base_dir / 'logs'
+    log_dir.mkdir(exist_ok=True)
+    
+    # Create timestamped log filename
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    log_file = log_dir / f'converter_{timestamp}.log'
+    
+    # Configure logging format
+    log_format = '%(asctime)s - %(levelname)s - %(message)s'
+    date_format = '%Y-%m-%d %H:%M:%S'
+    
+    # Setup file handler
+    file_handler = logging.FileHandler(log_file, encoding='utf-8')
+    file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(logging.Formatter(log_format, date_format))
+    
+    # Setup console handler (only warnings and errors)
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.WARNING)
+    console_handler.setFormatter(logging.Formatter('%(levelname)s: %(message)s'))
+    
+    # Configure root logger
+    logger = logging.getLogger()
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+    
+    # Log system information
+    logging.info("=" * 70)
+    logging.info("iOS Format Converter - Session Started")
+    logging.info("=" * 70)
+    logging.info(f"Log file: {log_file}")
+    logging.info(f"Python version: {sys.version}")
+    logging.info(f"Platform: {platform.platform()}")
+    logging.info(f"Processor: {platform.processor()}")
+    logging.info(f"Machine: {platform.machine()}")
+    
+    return str(log_file)
 
 
 # =============================================================================
@@ -87,9 +152,20 @@ class IOSConverter:
         3. System PATH
         4. Common installation directories
         """
+        logging.info("Initializing iOS Converter")
+        
         self.ffmpeg_path: Optional[str] = self._find_ffmpeg()
-        # Re-enable GPU detection
+        if self.ffmpeg_path:
+            logging.info(f"FFmpeg found: {self.ffmpeg_path}")
+        else:
+            logging.warning("FFmpeg not found")
+        
+        # Detect GPU encoder
         self.gpu_encoder: Optional[str] = self._detect_gpu_encoder() if self.ffmpeg_path else None
+        if self.gpu_encoder:
+            logging.info(f"GPU encoder detected: {self.gpu_encoder}")
+        else:
+            logging.info("No GPU encoder available, will use CPU encoding")
     
     def _find_ffmpeg(self) -> Optional[str]:
         """
@@ -182,8 +258,12 @@ class IOSConverter:
             ('h264_qsv', 'Intel Quick Sync'),
         ]
         
+        logging.info("Detecting GPU encoders...")
+        
         for encoder, name in encoders:
             try:
+                logging.debug(f"Testing {name} ({encoder})...")
+                
                 # First check if encoder is listed
                 result = subprocess.run(
                     [self.ffmpeg_path, '-hide_banner', '-encoders'],
@@ -193,6 +273,8 @@ class IOSConverter:
                 )
                 
                 if result.returncode == 0 and encoder in result.stdout:
+                    logging.debug(f"  {encoder} found in FFmpeg encoders list")
+                    
                     # Verify encoder actually works with real encoding parameters
                     # Test with settings similar to actual video conversion
                     test_cmd = [
@@ -231,11 +313,21 @@ class IOSConverter:
                     
                     # If the test succeeded, the GPU encoder is functional
                     if test_result.returncode == 0:
+                        logging.info(f"  ✓ {name} ({encoder}) is functional")
                         return encoder
+                    else:
+                        logging.warning(f"  ✗ {name} test failed: {test_result.stderr[:200]}")
+                else:
+                    logging.debug(f"  {encoder} not found in encoders list")
                     
-            except (subprocess.TimeoutExpired, Exception):
+            except subprocess.TimeoutExpired:
+                logging.warning(f"  ✗ {name} test timed out")
+                continue
+            except Exception as e:
+                logging.warning(f"  ✗ {name} test error: {str(e)}")
                 continue
         
+        logging.info("No GPU encoder available, will use CPU encoding")
         return None
     
     def convert_heic_to_png(
@@ -282,28 +374,36 @@ class IOSConverter:
         else:
             output_path = Path(output_path)
         
+        logging.info(f"Converting HEIC: {input_path} -> {output_path}")
         print(f"Converting: {input_path.name} -> {output_path.name}")
         
-        # Open image using context manager to ensure proper cleanup
-        # This prevents memory leaks by ensuring the image is closed
-        with Image.open(input_path) as img:
-            # Check if image has transparency (alpha channel)
-            # RGBA: RGB with Alpha, LA: Grayscale with Alpha, P: Palette mode
-            has_transparency = (
-                img.mode in ('RGBA', 'LA') or
-                (img.mode == 'P' and 'transparency' in img.info)
-            )
+        try:
+            # Open image using context manager to ensure proper cleanup
+            # This prevents memory leaks by ensuring the image is closed
+            with Image.open(input_path) as img:
+                # Check if image has transparency (alpha channel)
+                # RGBA: RGB with Alpha, LA: Grayscale with Alpha, P: Palette mode
+                has_transparency = (
+                    img.mode in ('RGBA', 'LA') or
+                    (img.mode == 'P' and 'transparency' in img.info)
+                )
+                
+                logging.debug(f"  Image mode: {img.mode}, Size: {img.size}, Transparency: {has_transparency}")
+                
+                if has_transparency:
+                    # Keep transparency for PNG output
+                    img.save(output_path, 'PNG')
+                else:
+                    # Convert to RGB (removes any alpha channel issues)
+                    # This also handles unusual color modes like CMYK
+                    img.convert('RGB').save(output_path, 'PNG')
             
-            if has_transparency:
-                # Keep transparency for PNG output
-                img.save(output_path, 'PNG')
-            else:
-                # Convert to RGB (removes any alpha channel issues)
-                # This also handles unusual color modes like CMYK
-                img.convert('RGB').save(output_path, 'PNG')
-        
-        print(f"✓ Completed: {output_path.name}")
-        return output_path
+            logging.info(f"  ✓ Successfully converted: {output_path}")
+            print(f"✓ Completed: {output_path.name}")
+            return output_path
+        except Exception as e:
+            logging.error(f"  ✗ Image conversion failed: {str(e)}", exc_info=True)
+            raise
     
     def convert_mov_to_mp4(
         self,
@@ -353,6 +453,7 @@ class IOSConverter:
         else:
             output_path = Path(output_path)
         
+        logging.info(f"Converting video: {input_path} -> {output_path}")
         print(f"Converting: {input_path.name} -> {output_path.name}")
         
         # Determine if we should use GPU acceleration
@@ -360,6 +461,8 @@ class IOSConverter:
         
         # Build FFmpeg command based on GPU availability
         if use_gpu:
+            logging.info(f"  Using GPU acceleration: {self.gpu_encoder}")
+            
             # GPU-accelerated encoding with proper settings
             cmd = [
                 self.ffmpeg_path,
@@ -381,6 +484,8 @@ class IOSConverter:
             ]
             print(f"  ⚡ Using GPU acceleration: {self.gpu_encoder}")
         else:
+            logging.info("  Using CPU encoding")
+            
             # CPU encoding (fallback)
             cmd = [
                 self.ffmpeg_path,
@@ -395,6 +500,8 @@ class IOSConverter:
                 str(output_path)
             ]
             print(f"  💻 Using CPU encoding")
+        
+        logging.debug(f"  FFmpeg command: {' '.join(cmd)}")
         
         try:
             # Run FFmpeg with captured output
@@ -411,8 +518,14 @@ class IOSConverter:
                 stderr_lines = result.stderr.strip().split('\n') if result.stderr else []
                 error_msg = stderr_lines[-1] if stderr_lines else "Unknown error"
                 
+                # Log full FFmpeg error output
+                logging.error(f"  FFmpeg failed with return code {result.returncode}")
+                logging.error(f"  Error output:\n{result.stderr}")
+                
                 # If GPU encoding failed, automatically retry with CPU
                 if use_gpu:
+                    logging.warning(f"  GPU encoding failed: {error_msg}")
+                    logging.info("  Retrying with CPU encoding...")
                     print(f"\n⚠️  GPU encoding failed, retrying with CPU...")
                     print(f"   GPU Error: {error_msg}")
                     
@@ -431,6 +544,8 @@ class IOSConverter:
                     ]
                     print(f"  💻 Using CPU encoding")
                     
+                    logging.debug(f"  CPU fallback command: {' '.join(cmd)}")
+                    
                     # Retry with CPU
                     result = subprocess.run(
                         cmd,
@@ -442,16 +557,26 @@ class IOSConverter:
                     if result.returncode != 0:
                         stderr_lines = result.stderr.strip().split('\n') if result.stderr else []
                         error_msg = stderr_lines[-1] if stderr_lines else "Unknown error"
+                        logging.error(f"  CPU encoding also failed: {error_msg}")
+                        logging.error(f"  CPU error output:\n{result.stderr}")
                         raise RuntimeError(f"Video conversion failed: {error_msg}")
+                    else:
+                        logging.info("  ✓ CPU encoding succeeded after GPU failure")
                 else:
                     # CPU encoding failed (no fallback available)
                     raise RuntimeError(f"Video conversion failed: {error_msg}")
                 
         except subprocess.TimeoutExpired:
+            logging.error(f"  Conversion timed out after 1 hour")
             raise RuntimeError("Conversion timed out (file too large or corrupted)")
         except FileNotFoundError:
+            logging.error(f"  FFmpeg not found at: {self.ffmpeg_path}")
             raise RuntimeError(f"FFmpeg not found")
+        except Exception as e:
+            logging.error(f"  Video conversion error: {str(e)}", exc_info=True)
+            raise
         
+        logging.info(f"  ✓ Successfully converted: {output_path}")
         print(f"✓ Completed: {output_path.name}")
         return output_path
     
@@ -716,11 +841,15 @@ def interactive_mode() -> None:
     success = 0
     failed = 0
     
+    logging.info(f"Starting batch conversion of {len(files_to_convert)} files")
+    
     for i, file_path in enumerate(files_to_convert, 1):
         print(f"\n[{i}/{len(files_to_convert)}] ", end="")
+        logging.info(f"Processing file {i}/{len(files_to_convert)}: {file_path}")
         
         if not os.path.exists(file_path):
             print(f"✗ File not found: {Path(file_path).name}")
+            logging.warning(f"File not found: {file_path}")
             failed += 1
             continue
         
@@ -729,6 +858,7 @@ def interactive_mode() -> None:
             success += 1
         except Exception as e:
             print(f"✗ Error: {Path(file_path).name} - {str(e)}")
+            logging.error(f"Conversion failed for {file_path}: {str(e)}", exc_info=True)
             failed += 1
     
     # Print summary
@@ -738,7 +868,12 @@ def interactive_mode() -> None:
     if failed > 0:
         print(f"   • {failed} file(s) failed")
     print(f"\n📂 Output saved to:\n   {output_dir}")
+    print(f"\n📋 Log file saved to:\n   {log_file}")
     print("\n" + "=" * 60)
+    
+    logging.info("=" * 70)
+    logging.info(f"Batch conversion complete: {success} succeeded, {failed} failed")
+    logging.info("=" * 70)
 
 
 # =============================================================================
@@ -752,6 +887,9 @@ def main() -> None:
     Parses command-line arguments and orchestrates the conversion process.
     Supports individual file conversion, directory scanning, and batch processing.
     """
+    # Initialize logging first
+    log_file = setup_logging()
+    
     # Setup argument parser with examples
     parser = argparse.ArgumentParser(
         description='Convert iOS formats (HEIC/HEIF, MOV) to PNG and MP4',

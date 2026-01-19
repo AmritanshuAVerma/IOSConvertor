@@ -1,0 +1,15 @@
+2026-01-19 08:58:37 - INFO - ======================================================================
+2026-01-19 08:58:37 - INFO - iOS Format Converter - Session Started
+2026-01-19 08:58:37 - INFO - ======================================================================
+2026-01-19 08:58:37 - INFO - Log file: E:\IosToJpg\dist\logs\converter_2026-01-19_08-58-37.log
+2026-01-19 08:58:37 - INFO - Python version: 3.12.6 (tags/v3.12.6:a4a2d2b, Sep  6 2024, 20:11:23) [MSC v.1940 64 bit (AMD64)]
+2026-01-19 08:58:37 - INFO - Platform: Windows-11-10.0.26200-SP0
+2026-01-19 08:58:37 - INFO - Processor: Intel64 Family 6 Model 183 Stepping 1, GenuineIntel
+2026-01-19 08:58:37 - INFO - Machine: AMD64
+2026-01-19 08:58:37 - INFO - Initializing iOS Converter
+2026-01-19 08:58:37 - INFO - FFmpeg found: C:\Users\admin\AppData\Local\Temp\_MEI196482\ffmpeg.exe
+2026-01-19 08:58:37 - INFO - Detecting GPU encoders...
+2026-01-19 08:58:37 - DEBUG - Testing NVIDIA NVENC (h264_nvenc)...
+2026-01-19 08:58:38 - DEBUG -   h264_nvenc found in FFmpeg encoders list
+2026-01-19 08:58:38 - INFO -   ✓ NVIDIA NVENC (h264_nvenc) is functional
+2026-01-19 08:58:38 - INFO - GPU encoder detected: h264_nvenc
