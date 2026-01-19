@@ -1,0 +1,11 @@
+# iOS Format Converter Dependencies
+
+# Image processing
+Pillow>=9.0.0
+
+# HEIC/HEIF support for Pillow
+pillow-heif>=0.10.0
+
+# Note: FFmpeg is required for video conversion
+# Download from: https://ffmpeg.org/download.html
+# Or install via: winget install FFmpeg

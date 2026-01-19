@@ -1,0 +1,38 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+.venv/
+venv/
+ENV/
+
+# PyInstaller build files
+build/
+*.spec
+
+# Distribution / packaging
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+
+# Converted output folders (generated at runtime)
+Converted_*/
+
+# Keep ffmpeg_bin folder but ignore large binaries for repo size
+# Uncomment below if you don't want to include ffmpeg in repo
+# ffmpeg_bin/
+
+# Keep dist folder for releases
+# dist/
