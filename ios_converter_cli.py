@@ -88,6 +88,7 @@ class IOSConverter:
         4. Common installation directories
         """
         self.ffmpeg_path: Optional[str] = self._find_ffmpeg()
+        self.gpu_encoder: Optional[str] = self._detect_gpu_encoder() if self.ffmpeg_path else None
     
     def _find_ffmpeg(self) -> Optional[str]:
         """
@@ -154,6 +155,49 @@ class IOSConverter:
         for path in common_paths:
             if os.path.exists(path):
                 return path
+        
+        return None
+    
+    def _detect_gpu_encoder(self) -> Optional[str]:
+        """
+        Detect available GPU encoder for hardware acceleration.
+        
+        Tests for GPU encoders in this order:
+        1. NVIDIA NVENC (h264_nvenc)
+        2. AMD AMF (h264_amf)
+        3. Intel Quick Sync (h264_qsv)
+        
+        Returns:
+            str: Name of available GPU encoder
+            None: If no GPU encoder available (falls back to CPU)
+        """
+        if not self.ffmpeg_path:
+            return None
+        
+        # List of GPU encoders to test (in priority order)
+        encoders = [
+            ('h264_nvenc', 'NVIDIA NVENC'),
+            ('h264_amf', 'AMD AMF'),
+            ('h264_qsv', 'Intel Quick Sync'),
+        ]
+        
+        for encoder, name in encoders:
+            try:
+                # Test if encoder is available
+                result = subprocess.run(
+                    [self.ffmpeg_path, '-hide_banner', '-encoders'],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                
+                if result.returncode == 0 and encoder in result.stdout:
+                    # Verify encoder actually works by doing a quick test
+                    # (some systems list encoders but can't use them)
+                    return encoder
+                    
+            except (subprocess.TimeoutExpired, Exception):
+                continue
         
         return None
     
@@ -274,19 +318,43 @@ class IOSConverter:
         
         print(f"Converting: {input_path.name} -> {output_path.name}")
         
-        # Build FFmpeg command with optimized settings
-        cmd = [
-            self.ffmpeg_path,
-            '-i', str(input_path),      # Input file
-            '-c:v', 'libx264',          # Video codec: H.264
-            '-preset', 'medium',         # Encoding speed/quality balance
-            '-crf', '23',                # Constant Rate Factor (18-28 is good)
-            '-c:a', 'aac',               # Audio codec: AAC
-            '-b:a', '128k',              # Audio bitrate: 128 kbps
-            '-movflags', '+faststart',   # Enable progressive download/streaming
-            '-y',                        # Overwrite output without asking
-            str(output_path)
-        ]
+        # Determine if we should use GPU acceleration
+        use_gpu = self.gpu_encoder is not None
+        
+        # Build FFmpeg command with GPU acceleration if available
+        if use_gpu:
+            # GPU-accelerated encoding
+            cmd = [
+                self.ffmpeg_path,
+                '-hwaccel', 'auto',         # Auto-detect hardware acceleration
+                '-i', str(input_path),       # Input file
+                '-c:v', self.gpu_encoder,    # GPU video encoder
+                '-preset', 'fast',           # Fast preset for GPU
+                '-b:v', '5M',                # Video bitrate (5 Mbps for quality)
+                '-maxrate', '5M',            # Max bitrate
+                '-bufsize', '10M',           # Buffer size
+                '-c:a', 'aac',               # Audio codec: AAC
+                '-b:a', '128k',              # Audio bitrate: 128 kbps
+                '-movflags', '+faststart',   # Enable progressive download
+                '-y',                        # Overwrite output
+                str(output_path)
+            ]
+            print(f"  ⚡ Using GPU acceleration: {self.gpu_encoder}")
+        else:
+            # CPU encoding (original method)
+            cmd = [
+                self.ffmpeg_path,
+                '-i', str(input_path),      # Input file
+                '-c:v', 'libx264',          # Video codec: H.264
+                '-preset', 'medium',         # Encoding speed/quality balance
+                '-crf', '23',                # Constant Rate Factor (18-28 is good)
+                '-c:a', 'aac',               # Audio codec: AAC
+                '-b:a', '128k',              # Audio bitrate: 128 kbps
+                '-movflags', '+faststart',   # Enable progressive download/streaming
+                '-y',                        # Overwrite output without asking
+                str(output_path)
+            ]
+            print(f"  💻 Using CPU encoding")
         
         try:
             # Run FFmpeg with captured output
@@ -477,6 +545,12 @@ def check_dependencies() -> bool:
     converter = IOSConverter()
     if converter.ffmpeg_path:
         print(f"  ✓ FFmpeg found: {converter.ffmpeg_path}")
+        
+        # Check GPU acceleration
+        if converter.gpu_encoder:
+            print(f"  ⚡ GPU acceleration: {converter.gpu_encoder} (ENABLED)")
+        else:
+            print(f"  💻 GPU acceleration: Not available (using CPU)")
     else:
         print("  ✗ FFmpeg is NOT installed (needed for video conversion)")
         all_ok = False
